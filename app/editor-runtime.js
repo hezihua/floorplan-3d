@@ -1,4 +1,6 @@
 
+import { ensureFloorplanStorage, schemesKey, schemeKey, PROJECTS_KEY } from './project-store.js';
+
 /* ======================= 多语言（中文 / English，默认中文） ======================= */
 const LANG_KEY = 'huxing-lang';
 let LANG = (() => { try { return localStorage.getItem(LANG_KEY) === 'en' ? 'en' : 'zh'; } catch(e) { return 'zh'; } })();
@@ -28,10 +30,9 @@ const nm = s => LANG === 'en' ? (NAMES_EN[s] ?? s) : s;
 // 静态文案：元素上写 data-en / data-en-title，中文原文首次切换时存进 dataset
 function applyStaticLang(){
   document.documentElement.lang = tr('zh-CN', 'en');
-  document.title = tr('户型装修设计', 'Floor Plan Designer');
+  document.title = activeProjectName ? `${activeProjectName} · ${tr('户型装修设计', 'Floor Plan Designer')}` : tr('户型装修设计', 'Floor Plan Designer');
   document.querySelectorAll('[data-en]').forEach(el => { el.dataset.zh ??= el.textContent; el.textContent = tr(el.dataset.zh, el.dataset.en); });
   document.querySelectorAll('[data-en-title]').forEach(el => { el.dataset.zhTitle ??= el.title; el.title = tr(el.dataset.zhTitle, el.dataset.enTitle); });
-  document.getElementById('langBtn').textContent = tr('EN', '中文');
 }
 
 /* ============================================================
@@ -43,7 +44,7 @@ function applyStaticLang(){
  *  右：3370/240/2760/240/3950 = 10560
  * ============================================================ */
 // 墙体：[x0,y0,x1,y1,类型]  b=承重(黑) e=外墙 n=可拆非承重 low=矮墙
-const WALLS = [
+let WALLS = [
   // 顶部外墙
   [1580,-240,2120,0,'b'],[1580,0,1820,300,'b'],[2120,-240,4580,0,'e'],[4580,-240,5140,0,'e'],
   [5760,-240,6050,0,'e'],[6050,-240,6600,0,'b'],[6360,0,6600,300,'b'],[6600,-240,9960,0,'e'],
@@ -71,7 +72,7 @@ const WALLS = [
   [6083,4600,6323,6610,'n'],[6323,6370,9960,6610,'n'],
 ];
 // 窗
-const WINS = [
+let WINS = [
   [5140,-240,5760,0],[1580,300,1820,3370],[-240,3370,1580,3610],[2180,3825,2420,4430],
   [10510,6370,12090,6610],[11850,6610,12090,9960],
   // 飘窗（主卧 / 子女房）
@@ -79,7 +80,7 @@ const WINS = [
   [10510,4110,11130,4210],[11030,4210,11130,5785],[10510,5785,11130,5885],
 ];
 // 平开门：洞口、铰点、关闭方向、开启方向、门宽
-const DOORS = [
+let DOORS = [
   {name:'小孩房门',rect:[4580,2400,4820,3280],h:[4580,3280],c:[0,-1],o:[-1,0],len:880},
   {name:'主卧门',rect:[6360,2400,6600,3280],h:[6600,3280],c:[0,-1],o:[1,0],len:880},
   {name:'主卫门',rect:[6360,1198,6600,1983],h:[6360,1198],c:[0,1],o:[-1,0],len:785},
@@ -88,12 +89,12 @@ const DOORS = [
   {name:'入户门',rect:[4580,8310,4820,9200],h:[4820,9200],c:[0,-1],o:[1,0],len:890,entry:true},
 ];
 // 推拉门
-const SLIDES = [
+let SLIDES = [
   {rect:[10270,7400,10510,9770],v:true},
   {rect:[1275,4950,2090,5190],v:false},
 ];
 const R = (x0,y0,x1,y1) => [[x0,y0],[x1,y0],[x1,y1],[x0,y1]];
-const ROOMS = [
+let ROOMS = [
   {id:'master', name:'主卧室', poly:R(6600,0,10270,3370), mat:'wood', at:[8435,2420]},
   {id:'mbath', name:'主卫浴', poly:R(4820,0,6360,2080), mat:'antislip', at:[5980,1780]},
   {id:'kid', name:'小孩房', poly:R(1820,0,4580,3370), mat:'wood', at:[3380,2330]},
@@ -108,6 +109,19 @@ const ROOMS = [
   {id:'bay1', name:'主卧飘窗', poly:[[10270,800],[10510,800],[10510,760],[11030,760],[11030,2650],[10510,2650],[10510,2600],[10270,2600]], mat:'marble', counted:false},
   {id:'bay2', name:'子女房飘窗', poly:[[10270,4260],[10510,4260],[10510,4210],[11030,4210],[11030,5785],[10510,5785],[10510,5740],[10270,5740]], mat:'marble', counted:false},
 ];
+const DEFAULT_PLAN = {rooms:ROOMS,walls:WALLS,wins:WINS,doors:DOORS,slides:SLIDES};
+function applyPlan(data){
+  const p = data || DEFAULT_PLAN;
+  ROOMS = structuredClone(p.rooms || DEFAULT_PLAN.rooms); WALLS = structuredClone(p.walls || DEFAULT_PLAN.walls);
+  WINS = structuredClone(p.wins || DEFAULT_PLAN.wins); DOORS = structuredClone(p.doors || DEFAULT_PLAN.doors); SLIDES = structuredClone(p.slides || DEFAULT_PLAN.slides);
+  if (data) {
+    const xs=[], ys=[];
+    ROOMS.forEach(r=>r.poly.forEach(([x,y])=>{xs.push(x);ys.push(y)}));
+    WALLS.forEach(w=>{xs.push(w[0],w[2]);ys.push(w[1],w[3])});
+    WINS.forEach(w=>{xs.push(w[0],w[2]);ys.push(w[1],w[3])}); DOORS.forEach(d=>{xs.push(d.rect[0],d.rect[2]);ys.push(d.rect[1],d.rect[3])});
+    if (xs.length) { const x0=Math.min(...xs), y0=Math.min(...ys), x1=Math.max(...xs), y1=Math.max(...ys), pad=Math.max(500,Math.max(x1-x0,y1-y0)*.12); BOUNDS={x:x0-pad,y:y0-pad,w:x1-x0+2*pad,h:y1-y0+2*pad}; }
+  } else if (typeof DEFAULT_BOUNDS !== 'undefined') BOUNDS = {...DEFAULT_BOUNDS};
+}
 const MATS = {
   wood:    {name:'橡木地板', price:320, sw:'#d8b88a'},
   walnut:  {name:'胡桃木地板', price:380, sw:'#9b7250'},
@@ -189,15 +203,26 @@ function defaultFurniture(){ return [
 
 function defaultState(){
   const rooms = {}; ROOMS.forEach(r => rooms[r.id] = {name:r.name, mat:r.mat});
-  return {furniture:defaultFurniture(), rooms, demolished:[], measures:[]};
+  return {furniture:defaultFurniture(), rooms, demolished:[], measures:[], plan:null};
 }
 
-const STORE = 'huxing-design-v1';
+const activePlanId = document.querySelector('[data-plan-id]')?.dataset.planId || 'legacy';
+const floorplanStorage = ensureFloorplanStorage(activePlanId);
+const activeFloorplan = floorplanStorage.geometry;
+let schemeList = floorplanStorage.schemes;
+const requestedSchemeId = new URLSearchParams(location.search).get('scheme');
+const mostRecentScheme = [...schemeList].sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0))[0];
+let activeSchemeId = schemeList.some(s => s.id === requestedSchemeId) ? requestedSchemeId : mostRecentScheme.id;
+let activeScheme = schemeList.find(s => s.id === activeSchemeId);
+const SCHEME_STORE = schemeKey(activePlanId,activeSchemeId);
+let activeProjectName = '';
+try { activeProjectName = JSON.parse(localStorage.getItem(PROJECTS_KEY) || '[]').find(p => p.id === activePlanId)?.name || ''; } catch(e) {}
 function load(){
-  try { const s = JSON.parse(localStorage.getItem(STORE)); if (s && Array.isArray(s.furniture)) return fixState(s); } catch(e) {}
-  return null;
+  try { const s = JSON.parse(localStorage.getItem(SCHEME_STORE)); if (s && Array.isArray(s.furniture)) return fixState(s); } catch(e) {}
+  const s = defaultState(); s.plan = activeFloorplan || null; return fixState(s);
 }
 function fixState(s){
+  applyPlan(activeFloorplan || null); s.plan = activeFloorplan || null;
   const d = defaultState();
   s.rooms = Object.assign(d.rooms, s.rooms || {});
   s.demolished = s.demolished || []; s.measures = s.measures || [];
@@ -208,9 +233,75 @@ const PX_MM = 25.4 / 96;                       // 1 CSS px = 0.2646 mm
 const COARSE = matchMedia('(pointer:coarse)').matches;   // iPad / 手机等触屏为主的设备
 const TAP = COARSE ? 9 : 4;                    // 手指按下后移动超过该像素才算拖动
 const narrow = () => matchMedia('(max-width:1100px)').matches;
-const BOUNDS = {x:-1850, y:-1750, w:15600, h:14100};
+const DEFAULT_BOUNDS = {x:-1850, y:-1750, w:15600, h:14100};
+let BOUNDS = {...DEFAULT_BOUNDS};
 const $ = s => document.querySelector(s);
 const svg = $('#plan');
+const editorHeader = document.querySelector('.app > header');
+const editorPrimaryBar = document.createElement('div'); editorPrimaryBar.className = 'toolbar-primary';
+const editorToolsBar = document.createElement('div'); editorToolsBar.className = 'toolbar-tools';
+const headerItems = Array.from(editorHeader.children);
+const toolbarLabels = {'编辑工具':'Editing tools','场景模式':'Scene mode','视图':'View','缩放与比例':'Zoom & scale','3D 场景':'3D scene','图层':'Layers','显示内容':'Visible layers'};
+const section = (title, ...items) => {
+  const el = document.createElement('section'); el.className = 'toolbar-section';
+  const label = document.createElement('span'); label.className = 'toolbar-section-label'; label.dataset.zh = title; label.dataset.en = toolbarLabels[title] || title; label.textContent = tr(title,label.dataset.en);
+  const content = document.createElement('div'); content.className = 'toolbar-section-content';
+  items.forEach(item => item && content.append(item)); el.append(label,content); return el;
+};
+const item = selector => headerItems.find(el => el.matches(selector));
+const pane = item('#paneBtns'), brand = item('.brand'), viewSeg = item('#viewSeg');
+const libToggle = pane?.querySelector('#tgLib'), panelToggle = pane?.querySelector('#tgPanel');
+const editTools = item('#tools'), zoomTools = headerItems.find(el => el.classList.contains('only2d') && el.querySelector('#zoomIn'));
+const sceneModes = item('#modes3d'), undoGroup = headerItems.find(el => el.querySelector('#undo'));
+const layers = item('#layers');
+const viewControls = headerItems.filter(el => el.classList.contains('only3d') && el !== sceneModes && el !== layers);
+const spacer = item('.spacer'), fileMenu = item('details.menu');
+const fileInput = item('#fileIn');
+const workspaceActions = document.createElement('div'); workspaceActions.className = 'toolbar-actions';
+if (undoGroup) workspaceActions.append(undoGroup);
+if (fileMenu) workspaceActions.append(fileMenu);
+const createPaneHeader = (button,label,icon) => {
+  const header = document.createElement('div'); header.className = 'sidebar-pane-header';
+  button.innerHTML = `<span class="pane-icon" aria-hidden="true">${icon}</span><span class="pane-label" data-zh="${label}" data-en="${label === '家具库' ? 'Furniture library' : 'Properties'}">${tr(label,label === '家具库' ? 'Furniture library' : 'Properties')}</span>`;
+  delete button.dataset.en; header.append(button); return header;
+};
+const libAside = document.querySelector('aside.lib'), panelAside = document.querySelector('aside.right');
+if (libToggle) libAside.prepend(createPaneHeader(libToggle,'家具库','◧'));
+if (panelToggle) panelAside.prepend(createPaneHeader(panelToggle,'属性','◨'));
+const mobilePaneControls = document.createElement('div'); mobilePaneControls.className = 'mobile-pane-controls grp';
+[[libToggle,'tgLibMobile'],[panelToggle,'tgPanelMobile']].forEach(([button,id]) => {
+  if (!button) return;
+  const clone = button.cloneNode(true); clone.id = id; mobilePaneControls.append(clone);
+});
+const viewMenu = document.createElement('details'); viewMenu.className = 'menu toolbar-menu';
+const viewSummary = document.createElement('summary'); viewSummary.className = 'btn'; viewSummary.dataset.zh = '视图设置 ▾'; viewSummary.dataset.en = 'View settings ▾'; viewSummary.textContent = tr(viewSummary.dataset.zh,viewSummary.dataset.en);
+const viewPop = document.createElement('div'); viewPop.className = 'menu-pop'; viewMenu.append(viewSummary,viewPop);
+if (zoomTools) { const zoomSection = section('缩放与比例',zoomTools); zoomSection.classList.add('only2d'); viewPop.append(zoomSection); }
+if (viewControls.length) { const sceneSection = section('3D 场景',...viewControls); sceneSection.classList.add('only3d'); viewPop.append(sceneSection); }
+const layersMenu = document.createElement('details'); layersMenu.className = 'menu toolbar-menu only2d';
+const layersSummary = document.createElement('summary'); layersSummary.className = 'btn'; layersSummary.dataset.zh = '图层 ▾'; layersSummary.dataset.en = 'Layers ▾'; layersSummary.textContent = tr(layersSummary.dataset.zh,layersSummary.dataset.en);
+const layersPop = document.createElement('div'); layersPop.className = 'menu-pop';
+if (layers) layersPop.append(section('显示内容',layers)); layersMenu.append(layersSummary,layersPop);
+if (fileMenu) {
+  const filePop = fileMenu.querySelector('.menu-pop');
+  const clearAll = undoGroup?.querySelector('#clearAll');
+  if (clearAll) { const divider = document.createElement('div'); divider.className = 'menu-divider'; filePop.append(divider,clearAll); }
+  if (fileInput) fileMenu.append(fileInput);
+}
+editorPrimaryBar.append(mobilePaneControls);
+if (brand) editorPrimaryBar.append(brand);
+if (viewSeg) editorPrimaryBar.append(viewSeg);
+if (editTools) editorToolsBar.append(section('编辑工具',editTools));
+if (sceneModes) { const sceneModeSection = section('场景模式',sceneModes); sceneModeSection.classList.add('only3d'); editorToolsBar.append(sceneModeSection); }
+editorToolsBar.append(section('视图',viewMenu),section('图层',layersMenu));
+if (spacer) editorToolsBar.append(spacer);
+editorToolsBar.append(workspaceActions);
+editorHeader.replaceChildren(editorPrimaryBar);
+const editorStage = document.querySelector('#stage');
+editorToolsBar.classList.add('workspace-toolbar');
+editorStage.prepend(editorToolsBar);
+const syncToolbarHeight = () => editorStage.style.setProperty('--workspace-toolbar-height', `${editorToolsBar.offsetHeight}px`);
+syncToolbarHeight(); new ResizeObserver(syncToolbarHeight).observe(editorToolsBar);
 
 
 /* ======================= 状态 / 历史 / 存储 ======================= */
@@ -220,12 +311,25 @@ const ui = {tool:'select', sel:null, mA:null, mCur:null,
 let view = {x0:0, y0:0, s:.06};
 const undoStack = [], redoStack = [];
 
-function save(){ try { localStorage.setItem(STORE, JSON.stringify(state)); } catch(e) {} }
+function save(){
+  try {
+    const {plan:_floorplan, ...schemeState} = state;
+    localStorage.setItem(SCHEME_STORE, JSON.stringify(schemeState));
+    if (activePlanId !== 'legacy') {
+      const projects = JSON.parse(localStorage.getItem(PROJECTS_KEY) || '[]');
+      const project = projects.find(p => p.id === activePlanId);
+      const schemes = JSON.parse(localStorage.getItem(schemesKey(activePlanId)) || '[]');
+      const scheme = schemes.find(s => s.id === activeSchemeId);
+      if (scheme) { scheme.updatedAt = Date.now(); localStorage.setItem(schemesKey(activePlanId), JSON.stringify(schemes)); }
+      if (project) { project.updatedAt = Date.now(); project.schemeCount=schemes.length; localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects)); }
+    }
+  } catch(e) {}
+}
 const snap = () => JSON.stringify(state);
 function commit(before){ undoStack.push(before); if (undoStack.length > 150) undoStack.shift(); redoStack.length = 0; save(); }
 function mutate(fn){ const b = snap(); fn(); commit(b); renderAll(); }
-function undo(){ if (!undoStack.length) return toast(tr('没有可撤销的操作', 'Nothing to undo')); redoStack.push(snap()); state = JSON.parse(undoStack.pop()); validateSel(); save(); renderAll(); }
-function redo(){ if (!redoStack.length) return; undoStack.push(snap()); state = JSON.parse(redoStack.pop()); validateSel(); save(); renderAll(); }
+function undo(){ if (!undoStack.length) return toast(tr('没有可撤销的操作', 'Nothing to undo')); redoStack.push(snap()); const hadPlan=!!state.plan; state = fixState(JSON.parse(undoStack.pop())); if(hadPlan!==!!state.plan) fitView(); validateSel(); renderDims(); save(); renderAll(); }
+function redo(){ if (!redoStack.length) return; undoStack.push(snap()); const hadPlan=!!state.plan; state = fixState(JSON.parse(redoStack.pop())); if(hadPlan!==!!state.plan) fitView(); validateSel(); renderDims(); save(); renderAll(); }
 function validateSel(){ if (ui.sel?.kind==='furn' && !getF(ui.sel.id)) ui.sel = null; }
 const getF = id => state.furniture.find(f => f.id === id);
 
@@ -456,6 +560,8 @@ function renderDims(){
     return s;
   };
   const g = $('#gDims');
+  if (state.plan) { g.innerHTML = ''; g.setAttribute('display','none'); return; }
+  g.setAttribute('display', ui.layers.dims ? 'inline' : 'none');
   g.innerHTML =
     chain(true,-750,0,[1580,240,2760,240,1540,240,3670]) + chain(true,-1250,0,[10270]) +
     chain(true,11350,0,[2180,240,2160,240,5450,240,1340]) + chain(true,11850,0,[11850]) +
@@ -518,8 +624,17 @@ function renderAll(){
 }
 
 function updateHeader(){
+  const subtitle = $('#subtitle');
   const tot = ROOMS.filter(r => r.counted !== false).reduce((a,r) => a + area(r.poly), 0);
-  $('#subtitle').textContent = tr(`套内使用面积约 ${fmt(tot)} m² · 尺寸单位 mm · 原图比例 1:60`, `Net floor area ≈ ${fmt(tot)} m² · Units: mm · Original scale 1:60`);
+  subtitle.textContent = ''; subtitle.hidden = true;
+  try {
+    const projects = JSON.parse(localStorage.getItem(PROJECTS_KEY) || '[]');
+    const project = projects.find(p => p.id === activePlanId);
+    const areaM2 = Math.round(tot * 100) / 100, originalScale = state.plan ? null : 60;
+    if (project && (project.areaM2 !== areaM2 || project.units !== 'mm' || project.originalScale !== originalScale)) {
+      Object.assign(project,{areaM2,units:'mm',originalScale}); localStorage.setItem(PROJECTS_KEY,JSON.stringify(projects));
+    }
+  } catch {}
   $('#undo').disabled = !undoStack.length; $('#redo').disabled = !redoStack.length;
   $('#undo').style.opacity = undoStack.length ? 1 : .4; $('#redo').style.opacity = redoStack.length ? 1 : .4;
 }
@@ -640,6 +755,7 @@ function syncPaneBtns(){
   const els = {lib:$('aside.lib'), panel:$('aside.right')}, n = narrow();
   const vis = k => n ? els[k].classList.contains('open') : !panes[k === 'lib' ? 'hideLib' : 'hidePanel'];
   $('#tgLib').classList.toggle('on', vis('lib')); $('#tgPanel').classList.toggle('on', vis('panel'));
+  $('#tgLibMobile')?.classList.toggle('on', vis('lib')); $('#tgPanelMobile')?.classList.toggle('on', vis('panel'));
   $('#tgLib').title = vis('lib') ? tr('收起家具库 ( [ )', 'Hide library ( [ )') : tr('展开家具库 ( [ )', 'Show library ( [ )');
   $('#tgPanel').title = vis('panel') ? tr('收起属性面板 ( ] )', 'Hide properties ( ] )') : tr('展开属性面板 ( ] )', 'Show properties ( ] )');
   $('#stage').classList.toggle('drawer-panel', n && vis('panel'));   // 属性抽屉盖住画面时让出底部工具条
@@ -951,7 +1067,6 @@ document.addEventListener('keydown', e => {
   if (mod && k === 'd'){ e.preventDefault(); duplicateSel(); return; }
   if (mod) return;
   if (k === '[' || k === ']'){ drawer(k === '[' ? 'lib' : 'panel'); return; }
-  if (k === 'f' && e.shiftKey){ toggleFullscreen(); return; }
   if (k === 't') setView(is3D() ? '2d' : '3d');
   else if (is3D() && ['v','m','x','f','+','=','-'].includes(k)) return;
   else if (k === 'v') setTool('select');
@@ -1084,7 +1199,7 @@ document.querySelectorAll('#viewSeg .btn').forEach(b => b.onclick = () => setVie
 document.querySelectorAll('#tools .btn').forEach(b => b.onclick = () => setTool(b.dataset.tool));
 document.querySelectorAll('#layers .btn').forEach(b => b.onclick = () => {
   const k = b.dataset.layer; ui.layers[k] = !ui.layers[k]; b.classList.toggle('on', ui.layers[k]);
-  if (k === 'dims') $('#gDims').setAttribute('display', ui.layers.dims ? 'inline' : 'none');
+  if (k === 'dims') $('#gDims').setAttribute('display', ui.layers.dims && !state.plan ? 'inline' : 'none');
   else if (k !== 'wallSnap') renderAll();
 });
 $('#zoomIn').onclick = () => zoomCenter(1.25);
@@ -1095,34 +1210,16 @@ $('#s100').onclick = () => setRatio(100);
 $('#undo').onclick = undo; $('#redo').onclick = redo;
 $('#clearAll').onclick = clearLayout;
 
-/* 全屏：标准 API + Safari（iPad）的 webkit 前缀版本 */
-const fsEl = () => document.fullscreenElement || document.webkitFullscreenElement;
-function toggleFullscreen(){
-  const de = document.documentElement;
-  if (fsEl()) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-  else {
-    const req = de.requestFullscreen || de.webkitRequestFullscreen;
-    if (!req) return toast(tr('当前浏览器不支持网页全屏，可在 Safari 中「添加到主屏幕」后以全屏方式打开', 'Fullscreen is not supported here — in Safari, use "Add to Home Screen" to open it fullscreen'));
-    Promise.resolve(req.call(de)).catch(() => toast(tr('无法进入全屏', 'Could not enter fullscreen')));
-  }
-}
-function syncFullscreen(){
-  const on = !!fsEl(), b = $('#fullscreen');
-  b.textContent = '⛶ ' + (on ? tr('退出全屏', 'Exit fullscreen') : tr('全屏', 'Fullscreen'));
-  b.title = (on ? tr('退出全屏', 'Exit fullscreen') : tr('全屏', 'Fullscreen')) + ' (Shift+F)';
-}
-$('#fullscreen').onclick = toggleFullscreen;
-['fullscreenchange', 'webkitfullscreenchange'].forEach(t => document.addEventListener(t, syncFullscreen));
-// 已从主屏幕以独立 App 方式打开时本就是全屏，隐藏按钮
-if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) $('#fullscreen').hidden = true;
 $('#tgLib').onclick = () => drawer('lib');
 $('#tgPanel').onclick = () => drawer('panel');
+$('#tgLibMobile').onclick = () => drawer('lib');
+$('#tgPanelMobile').onclick = () => drawer('panel');
 // 触屏上点菜单以外的地方收起「文件」菜单
-document.addEventListener('pointerdown', e => { const m = $('details.menu'); if (m.open && !m.contains(e.target)) m.open = false; });
+document.addEventListener('pointerdown', e => { document.querySelectorAll('details.menu').forEach(m => { if (m.open && !m.contains(e.target)) m.open = false; }); });
 matchMedia('(max-width:1100px)').addEventListener('change', () => drawer(null));
 drawer(null);                                  // 恢复上次的面板收起状态
 $('#exportPng').onclick = exportPNG;
-$('#exportJson').onclick = () => download(tr('户型装修方案', 'floor-plan-design') + '.json', new Blob([JSON.stringify(state, null, 2)], {type:'application/json'}));
+$('#exportJson').onclick = () => { const {plan:_floorplan,...schemeState}=state; download(tr('装修方案', 'design-scheme') + '.json', new Blob([JSON.stringify(schemeState, null, 2)], {type:'application/json'})); };
 $('#importJson').onclick = () => $('#fileIn').click();
 $('#fileIn').onchange = e => {
   const file = e.target.files[0]; if (!file) return;
@@ -1132,7 +1229,37 @@ $('#fileIn').onchange = e => {
   });
   e.target.value = '';
 };
-$('#reset').onclick = () => { if (confirm(tr('恢复为默认设计方案？（可撤销）', 'Reset to the default design? (undoable)'))){ const b = snap(); state = defaultState(); ui.sel = null; commit(b); renderAll(); } };
+if (activeProjectName) { const brand = $('.brand b'); brand.dataset.zh = `${activeProjectName} · 户型装修设计`; brand.dataset.en = `${activeProjectName} · Interior Design`; }
+const schemeMenu = document.createElement('details'); schemeMenu.className = 'menu scheme-menu';
+const schemeSummary = document.createElement('summary'); schemeSummary.className = 'btn'; schemeSummary.textContent = `${tr('方案','Scheme')} · ${activeScheme.name} ▾`; schemeMenu.append(schemeSummary);
+const schemePop = document.createElement('div'); schemePop.className = 'menu-pop'; schemeMenu.append(schemePop); $('.brand').after(schemeMenu);
+const persistSchemeList = () => { localStorage.setItem(schemesKey(activePlanId),JSON.stringify(schemeList)); const projects=JSON.parse(localStorage.getItem(PROJECTS_KEY)||'[]'); const p=projects.find(x=>x.id===activePlanId); if(p){p.updatedAt=Date.now();p.schemeCount=schemeList.length;localStorage.setItem(PROJECTS_KEY,JSON.stringify(projects));} };
+const goScheme = id => { window.location.href = `/editor/${encodeURIComponent(activePlanId)}?scheme=${encodeURIComponent(id)}`; };
+function renderSchemeMenu(){
+  schemePop.innerHTML='';
+  schemeList.forEach(s=>{ const b=document.createElement('button'); b.className='btn'; b.textContent=`${s.id===activeSchemeId?'✓ ':''}${s.name}`; b.onclick=()=>{schemeMenu.open=false; if(s.id!==activeSchemeId) goScheme(s.id);}; schemePop.append(b); });
+  const divider=document.createElement('div'); divider.style.cssText='border-top:1px solid var(--line);margin:4px 0'; schemePop.append(divider);
+  const action=(label,fn)=>{const b=document.createElement('button');b.className='btn';b.textContent=label;b.onclick=()=>{schemeMenu.open=false;fn();};schemePop.append(b);};
+  action(tr('新建空白方案','New empty scheme'),()=>{
+    const now=Date.now(),id=`scheme-${now.toString(36)}-${Math.random().toString(36).slice(2,6)}`,rooms={}; ROOMS.forEach(r=>rooms[r.id]={name:r.name,mat:r.mat||'tile800'});
+    const item={id,name:`${tr('方案','Scheme')} ${schemeList.length+1}`,createdAt:now,updatedAt:now};
+    localStorage.setItem(schemeKey(activePlanId,id),JSON.stringify({furniture:[],rooms,demolished:[],measures:[]})); schemeList=[item,...schemeList];persistSchemeList();goScheme(id);
+  });
+  action(tr('复制当前方案','Duplicate current scheme'),()=>{
+    const now=Date.now(),id=`scheme-${now.toString(36)}-${Math.random().toString(36).slice(2,6)}`,item={id,name:`${activeScheme.name} ${tr('副本','copy')}`,createdAt:now,updatedAt:now},copy=JSON.parse(snap());delete copy.plan;
+    localStorage.setItem(schemeKey(activePlanId,id),JSON.stringify(copy));schemeList=[item,...schemeList];persistSchemeList();goScheme(id);
+  });
+  action(tr('重命名当前方案','Rename current scheme'),()=>{
+    const name=prompt(tr('方案名称','Scheme name'),activeScheme.name)?.trim();if(!name)return;
+    activeScheme.name=name;activeScheme.updatedAt=Date.now();persistSchemeList();schemeSummary.textContent=`${tr('方案','Scheme')} · ${name} ▾`;
+  });
+  const del=document.createElement('button');del.className='btn danger';del.textContent=tr('删除当前方案','Delete current scheme');del.disabled=schemeList.length<=1;del.onclick=()=>{
+    if(schemeList.length<=1||!confirm(tr('删除当前方案？此操作不可撤销。','Delete this scheme? This cannot be undone.')))return;
+    localStorage.removeItem(schemeKey(activePlanId,activeSchemeId));const next=schemeList.filter(s=>s.id!==activeSchemeId);schemeList=next;persistSchemeList();goScheme(next[0].id);
+  };schemePop.append(del);
+}
+renderSchemeMenu();
+$('#reset').onclick = () => { if (confirm(tr('恢复为默认设计方案？（可撤销）', 'Reset this scheme to its defaults? (undoable)'))){ const b = snap(); state = defaultState(); state.plan = activeFloorplan || null; if(activeFloorplan) state.furniture=[]; state=fixState(state); ui.sel = null; commit(b); renderDims(); renderAll(); } };
 // 横竖屏切换、表头换行等都会改变画布尺寸；尺寸从 0 恢复（如首次布局）时重新适应窗口
 // 其余尺寸变化（收起 / 展开面板等）保持画面中心不动
 let lastW = 0, lastH = 0;
@@ -1145,14 +1272,15 @@ new ResizeObserver(() => {
 
 function setLang(l){
   LANG = l; try { localStorage.setItem(LANG_KEY, l); } catch(e) {}
-  applyStaticLang(); syncFullscreen(); syncModeHint(); syncPaneBtns();
+  applyStaticLang(); syncModeHint(); syncPaneBtns();
+  schemeSummary.textContent = `${tr('方案','Scheme')} · ${activeScheme.name} ▾`; renderSchemeMenu();
   buildLib(); renderOpenings(); renderAll();
   $('#tip').textContent = TIPS()[viewMode];
   window.View3D?.relang();
 }
-$('#langBtn').onclick = () => setLang(LANG === 'en' ? 'zh' : 'en');
+window.addEventListener('floorplan-language-change', e => setLang(e.detail === 'en' ? 'en' : 'zh'));
 
-applyStaticLang(); syncFullscreen();
+applyStaticLang();
 buildDefs(); buildLib(); renderOpenings(); renderDims();
 $('#tip').textContent = TIPS()['2d'];
 fitView(); renderAll();
@@ -1172,10 +1300,11 @@ import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
 import {CSS2DRenderer, CSS2DObject} from 'three/addons/renderers/CSS2DRenderer.js';
 
 const stage = $('#stage'), host = $('#view3d');
-const OX = 6000, OY = 5300, H = 2.8, FOV = 45;       // 户型中心放在世界原点，层高 2.8 m
+let OX = 6000, OY = 5300, H = 2.8; const FOV = 45;  // 户型中心放在世界原点，层高 2.8 m
 const wx = x => (x - OX) / 1000, wz = y => (y - OY) / 1000, M = v => v / 1000;
 const SW = () => stage.clientWidth, SH = () => stage.clientHeight;
 const opt = {cut:2.8, furn:true, labels:true, night:false, hour:10, mode:'orbit'};
+let cameraPreset = 'iso';
 
 let inited = false, active = false, raf = 0, anim = null, fly = null;
 let renderer, labelRenderer, scene, camera, orbit, walkCtl, hemi, sun, ground, glassMat, wallMat, capMat, frameMat;
@@ -1200,6 +1329,7 @@ function init(){
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(FOV, SW()/SH(), .05, 300);
   orbit = new OrbitControls(camera, renderer.domElement);
+  orbit.addEventListener('start', () => { if (cameraPreset) { cameraPreset = null; syncCameraPresetBtns(); } });
   orbit.enableDamping = true; orbit.maxPolarAngle = Math.PI*.495; orbit.minDistance = 1.5; orbit.maxDistance = 45;
   walkCtl = new PointerLockControls(camera, document.body);
   walkCtl.addEventListener('lock', () => { $('#walkOverlay').style.display = 'none'; $('#cross').style.display = 'block'; });
@@ -1939,6 +2069,7 @@ const edgeMat = new THREE.LineBasicMaterial({color:0x6f675b}), skirtMat = new TH
 function shapeOf(poly, flip){ const s = new THREE.Shape(); poly.forEach(([x, y], i) => s[i ? 'lineTo' : 'moveTo'](wx(x), flip ? wz(y) : -wz(y))); return s; }
 
 function buildArch(){
+  OX = BOUNDS.x + BOUNDS.w/2; OY = BOUNDS.y + BOUNDS.h/2; H = (state.plan?.wallHeight || 2800) / 1000;
   clearGroup(archFloor); clearGroup(archUp); lampG.clear(); doors.length = 0; colliders = [];
   const top = opt.cut;
   ROOMS.forEach(r => {
@@ -1964,7 +2095,7 @@ function buildArch(){
     colliders.push([wx(w[0]), wz(w[1]), wx(w[2]), wz(w[3])]);
   });
   // 门洞、飘窗洞口上方过梁
-  [...DOORS.map(d => [d.rect, 2.1]), ...SLIDES.map(s => [s.rect, s.v ? 2.4 : 2.1]), [[10270,800,10510,2600], 2.4], [[10270,4260,10510,5740], 2.4]]
+  [...DOORS.map(d => [d.rect, 2.1]), ...SLIDES.map(s => [s.rect, s.v ? 2.4 : 2.1]), ...(state.plan ? [] : [[[10270,800,10510,2600], 2.4], [[10270,4260,10510,5740], 2.4]])]
     .forEach(([r, h]) => { if (top > h) wallBox(r, h, top); });
   WINS.forEach((r, i) => {
     const sill = i === 0 ? 1.4 : i >= 6 ? .45 : .9, head = 2.4;
@@ -2027,7 +2158,7 @@ function buildLabels(){
 // 只重建变化的部分
 function sync(force){
   if (!inited || (!active && !force)) return;
-  const a = JSON.stringify([state.rooms, state.demolished, opt.cut]), f = JSON.stringify(state.furniture), l = JSON.stringify([state.rooms, opt.cut]);
+  const a = JSON.stringify([state.plan, ROOMS, WALLS, WINS, DOORS, SLIDES, state.rooms, state.demolished, opt.cut]), f = JSON.stringify(state.furniture), l = JSON.stringify([state.rooms, opt.cut]);
   if (force || a !== sigArch){ sigArch = a; buildArch(); }
   if (force || f !== sigFurn){ sigFurn = f; buildFurn(); }
   if (force || l !== sigLabels){ sigLabels = l; buildLabels(); }
@@ -2072,7 +2203,7 @@ function isoFrom(P){
   const d = THREE.MathUtils.clamp(P.p.y, 5, 30), dir = new THREE.Vector3(.3, .82, .49).normalize();
   return pose(P.t.clone(), P.t.clone().addScaledVector(dir, d));
 }
-const isoWhole = () => pose(new THREE.Vector3(0, 0, 0), new THREE.Vector3(5.5, 15.5, 10));
+const isoWhole = () => { const d = Math.max(7, M(Math.max(BOUNDS.w, BOUNDS.h))*1.25); return pose(new THREE.Vector3(0,0,0), new THREE.Vector3(d*.35,d*.9,d*.55)); };
 const topWhole = () => pose(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 19, 1e-4));
 const curPose = () => pose(orbit.target.clone(), camera.position.clone());
 // 以目标点为中心做球坐标插值：镜头沿弧线倾斜环绕，而不是直线穿越
@@ -2099,6 +2230,7 @@ function flyToRoom(id){
 /* ======================= 进入 / 退出 3D ======================= */
 async function enter(){
   init(); active = true;
+  cameraPreset = 'iso'; syncCameraPresetBtns();
   renderer.setSize(SW(), SH()); labelRenderer.setSize(SW(), SH()); camera.aspect = SW()/SH(); camera.updateProjectionMatrix();
   sync(true);
   opt.mode = 'orbit'; orbit.enabled = false; showLabels(false);
@@ -2220,6 +2352,7 @@ function setMode(m){
   if (anim) return;
   opt.mode = m; syncModeBtns();
   if (m === 'walk'){
+    cameraPreset = null; syncCameraPresetBtns();
     window.select(null);
     if (opt.cut < H){ opt.cut = H; syncCutBtns(); sync(); }
     orbit.enabled = false; fly = null;
@@ -2227,6 +2360,7 @@ function setMode(m){
     $('#walkOverlay').style.display = 'flex';
     syncHint3d();
   } else {
+    cameraPreset = 'iso'; syncCameraPresetBtns();
     walkCtl.unlock(); stopTouchWalk(); orbit.enabled = true;
     $('#walkOverlay').style.display = 'none'; $('#cross').style.display = 'none';
     syncHint3d();
@@ -2268,6 +2402,7 @@ addEventListener('keyup', e => keys[e.code] = false);
 
 /* ======================= 工具栏 ======================= */
 function syncModeBtns(){ document.querySelectorAll('#modes3d .btn').forEach(b => b.classList.toggle('on', b.dataset.mode === opt.mode)); }
+function syncCameraPresetBtns(){ $('#vIso').classList.toggle('on', cameraPreset === 'iso'); $('#vTop').classList.toggle('on', cameraPreset === 'top'); }
 function syncCutBtns(){ document.querySelectorAll('[data-cut]').forEach(b => b.classList.toggle('on', +b.dataset.cut === opt.cut)); }
 function syncWalkTexts(){
   const t = COARSE
@@ -2287,8 +2422,8 @@ function bindUI(){
   $('#walkExit').onclick = () => setMode('orbit');
   bindJoystick();
   syncWalkTexts();
-  $('#vIso').onclick = () => { if (opt.mode === 'walk') setMode('orbit'); else flyTo(isoWhole()); };
-  $('#vTop').onclick = () => { if (opt.mode === 'walk') setMode('orbit'); flyTo(topWhole()); };
+  $('#vIso').onclick = () => { if (opt.mode === 'walk') setMode('orbit'); else flyTo(isoWhole()); cameraPreset = 'iso'; syncCameraPresetBtns(); };
+  $('#vTop').onclick = () => { if (opt.mode === 'walk') setMode('orbit'); flyTo(topWhole()); cameraPreset = 'top'; syncCameraPresetBtns(); };
   document.querySelectorAll('[data-cut]').forEach(b => b.onclick = () => { if (opt.mode === 'walk') return; opt.cut = +b.dataset.cut; syncCutBtns(); sync(); });
   document.querySelectorAll('#toggles3d .btn').forEach(b => b.onclick = () => {
     const k = b.dataset.t; opt[k] = !opt[k]; b.classList.toggle('on', opt[k]);
@@ -2297,6 +2432,7 @@ function bindUI(){
     if (k === 'night') applyLight();
   });
   $('#sun').oninput = e => { opt.hour = +e.target.value; applyLight(); };
+  syncCameraPresetBtns();
 }
 
 /* ======================= 主循环 ======================= */
@@ -2319,4 +2455,4 @@ function shot(){ const a = document.createElement('a'); a.download = tr('户型�
 
 function relang(){ syncWalkTexts(); if (inited) buildLabels(); }
 
-window.View3D = {enter, exit, relang, sync:() => sync(), shot, groundAt, flyToRoom:id => active && !anim && flyToRoom(id), walking:() => active && opt.mode === 'walk'};
+window.View3D = {enter, exit, relang, sync:force => sync(force), shot, groundAt, flyToRoom:id => active && !anim && flyToRoom(id), walking:() => active && opt.mode === 'walk'};

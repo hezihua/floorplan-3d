@@ -3,7 +3,11 @@
 import { useEffect } from "react";
 import { editorMarkup } from "./editor-markup";
 
-export default function Editor() {
+const markupWithoutGlobalActions = editorMarkup
+  .replace(/<button class="btn" id="langBtn"[\s\S]*?<\/button>/, "")
+  .replace(/<button class="btn" id="fullscreen"[\s\S]*?<\/button>/, "");
+
+export default function Editor({ planId }: { planId: string }) {
   useEffect(() => {
     let cancelled = false;
 
@@ -16,5 +20,5 @@ export default function Editor() {
     };
   }, []);
 
-  return <div dangerouslySetInnerHTML={{ __html: editorMarkup }} />;
+  return <div className="editor-shell" data-plan-id={planId} dangerouslySetInnerHTML={{ __html: markupWithoutGlobalActions }} />;
 }

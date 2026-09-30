@@ -1,5 +1,5 @@
-import Editor from "./Editor";
+import FloorplanList from "./FloorplanList";
 
 export default function Home() {
-  return <Editor />;
+  return <FloorplanList />;
 }
