@@ -18,6 +18,10 @@ pnpm build
 pnpm start
 ```
 
+## 用户文档
+
+- [使用说明](docs/使用说明.md)：启动、2D 编辑、3D 漫游、保存、导入导出和快捷键。
+
 ## 项目结构
 
 - `app/page.tsx`：应用首页路由
@@ -25,5 +29,6 @@ pnpm start
 - `app/editor-markup.ts`：编辑器页面结构
 - `app/editor-runtime.js`：2D 编辑器与 Three.js 3D 场景逻辑
 - `app/globals.css`：应用样式
+- `docs/使用说明.md`：用户操作指南
 
-户型、材料与家具数据和方案存储仍由编辑器运行时管理；方案默认保存在浏览器本地。\n
+户型、材料与家具数据和方案存储仍由编辑器运行时管理；方案默认保存在浏览器本地。
