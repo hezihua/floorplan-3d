@@ -23,3 +23,13 @@ tmp/
 # 环境变量
 .env
 .env.*
+
+# Next.js
+.next/
+out/
+
+
+
+
+# AQG state is disabled for this repository
+.aqg/
