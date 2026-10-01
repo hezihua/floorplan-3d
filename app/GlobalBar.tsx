@@ -49,8 +49,7 @@ export default function GlobalBar() {
   };
 
   return <div className={styles.bar}>
-    <a className={styles.brand} href="/" aria-label={lang === "zh" ? "返回户型列表" : "Return to plans"}><span>户</span><strong>{lang === "zh" ? "户型设计" : "Floorplan Studio"}</strong></a>
-    <a className={styles.listLink} href="/">{lang === "zh" ? "户型列表" : "Plans"}</a>
+    <a className={styles.brand} href="/" aria-label={lang === "zh" ? "返回首页" : "Return home"}><span>户</span><strong>{lang === "zh" ? "户型设计" : "Floorplan Studio"}</strong></a>
     <div className={styles.spacer} />
     <button className={styles.button} onClick={toggleLanguage} title="Switch language / 切换语言">{lang === "zh" ? "EN" : "中文"}</button>
     {!standalone && <button className={styles.button} onClick={() => void toggleFullscreen()} title={fullscreen ? (lang === "zh" ? "退出全屏 (Shift+F)" : "Exit fullscreen (Shift+F)") : (lang === "zh" ? "全屏 (Shift+F)" : "Fullscreen (Shift+F)")}>{fullscreen ? (lang === "zh" ? "⛶ 退出全屏" : "⛶ Exit fullscreen") : (lang === "zh" ? "⛶ 全屏" : "⛶ Fullscreen")}</button>}
